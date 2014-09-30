@@ -47,7 +47,6 @@ static sb_arg_t attachsql_drv_args[] =
   {"attachsql-user", "libAttachSQL user", SB_ARG_TYPE_STRING, ""},
   {"attachsql-password", "libAttachSQL password", SB_ARG_TYPE_STRING, ""},
   {"attachsql-db", "libAttachSQL database name", SB_ARG_TYPE_STRING, "sbtest"},
-  
   {NULL, NULL, SB_ARG_TYPE_NULL, NULL}
 };
 
@@ -147,8 +146,6 @@ int register_driver_attachsql(sb_list_t *drivers)
 
 int attachsql_drv_init(void)
 {
-  char *s;
-  
   args.hosts = sb_get_value_list("attachsql-host");
   if (SB_LIST_IS_EMPTY(args.hosts))
   {
@@ -190,14 +187,12 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
 
   if (args.socket)
   {
-    DEBUG("attachsql_connect_create(%p \"%s\", \"%s\", \"%s\", \"%s\")",
-      con,
+    DEBUG("attachsql_connect_create(\"%s\", \"%s\", \"%s\", \"%s\")",
       args.socket,
       args.user,
       args.password,
       args.db);
-    con= attachsql_connect_create(con,
-                             args.socket,
+    con= attachsql_connect_create(args.socket,
                              0,
                              args.user,
                              args.password,
@@ -212,15 +207,13 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     host = SB_LIST_ENTRY(hosts_pos, value_t, listitem)->data;
     pthread_mutex_unlock(&hosts_mutex);
 
-    DEBUG("attachsql_connect_create(%p \"%s\", %u, \"%s\", \"%s\", \"%s\")",
-          con,
+    DEBUG("attachsql_connect_create(\"%s\", %u, \"%s\", \"%s\", \"%s\")",
           host,
           args.port,
           args.user,
           args.password,
           args.db);
-    con= attachsql_connect_create(con,
-                             host,
+    con= attachsql_connect_create(host,
                              args.port,
                              args.user,
                              args.password,
@@ -235,6 +228,7 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     attachsql_error_free(error);
     return 1;
   }
+  /*
   if ((error= attachsql_connect(con)))
   {
     log_text(LOG_FATAL, "unable to connect to libAttachSQL server");
@@ -244,6 +238,7 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     return 1;
 
   }
+  */
   sb_conn->ptr = con;
 
   return 0;
@@ -384,6 +379,9 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
   attachsql_error_st *error= NULL;
   attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
 
+  /* Close any previous query */
+  attachsql_query_close(con);
+
   DEBUG("attachsql_query(%p, \"%s\", %u)",
         con,
         query,
@@ -407,7 +405,7 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
       return SB_DB_ERROR_FAILED;
     }
   }
-  rs->connection->ptr= con;
+  //rs->connection->ptr= con;
   DEBUG("attachsql_query \"%s\" returned %d", query, aret);
 
   return SB_DB_ERROR_NONE;
@@ -420,9 +418,9 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
 int attachsql_drv_fetch(db_result_set_t *rs)
 {
   /* NYI */
-  printf("in attachsql_drv_fetch_row!\n");
+  db_row_t row;
 
-  return attachsql_drv_fetch_row(rs, 0);
+  return attachsql_drv_fetch_row(rs, &row);
 }
 
 
@@ -431,8 +429,10 @@ int attachsql_drv_fetch(db_result_set_t *rs)
 
 int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
 {
+  attachsql_error_st *error= NULL;
+  attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
+
   /* NYI */
-  printf("in attachsql_drv_fetch_row!\n");
 
   attachsql_connect_t *con = rs->connection->ptr;;
 
@@ -442,7 +442,6 @@ int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
 
     if (error)
     {
-      rc= error->code;
       log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", error->code, error->msg);
       attachsql_error_free(error);
       return 1;
@@ -453,7 +452,7 @@ int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
     return 1;
   }
   row->ptr= attachsql_query_row_get(con, NULL);
-
+  attachsql_query_row_next(con);
 
   return 0;
 }
@@ -474,10 +473,11 @@ unsigned long long attachsql_drv_num_rows(db_result_set_t *rs)
 int attachsql_drv_store_results(db_result_set_t *rs)
 {
   int ret= 0;
+  db_row_t row;
   /* libAttachSQL can't do things in this order */
   while (ret == 0)
   {
-    ret= attachsql_drv_fetch_row(rs, rs->row);
+    ret= attachsql_drv_fetch_row(rs, &row);
   }
 
   return SB_DB_ERROR_NONE;
