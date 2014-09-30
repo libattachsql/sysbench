@@ -16,4 +16,4 @@
 
 noinst_LIBRARIES = libsbattachsql.a
 
-libsbdrizzle_a_SOURCES = drv_attachsql.c
+libsbattachsql_a_SOURCES = drv_attachsql.c

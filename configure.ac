@@ -112,7 +112,7 @@ AC_ARG_WITH([attachsql],
             AS_HELP_STRING([--with-attachsql],[compile with libattachsql support (default is enabled)]),
             [ac_cv_use_attachsql=$withval], [ac_cv_use_attachsql=yes]
 )
-AC_CACHE_CHECK([whether to compile with libattachsql support], [ac_cv_use_attachsqk], [ac_cv_use_attachsql=no])
+AC_CACHE_CHECK([whether to compile with libattachsql support], [ac_cv_use_attachsql], [ac_cv_use_attachsql=no])
 
 
 # Check if we should compile with Oracle support
@@ -450,6 +450,7 @@ sysbench/drivers/mysql/Makefile
 sysbench/drivers/drizzle/Makefile
 sysbench/drivers/oracle/Makefile
 sysbench/drivers/pgsql/Makefile
+sysbench/drivers/attachsql/Makefile
 sysbench/tests/Makefile
 sysbench/tests/cpu/Makefile
 sysbench/tests/fileio/Makefile
