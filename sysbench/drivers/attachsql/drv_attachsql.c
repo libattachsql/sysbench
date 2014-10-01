@@ -184,6 +184,7 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
   attachsql_connect_t     *con= NULL;
   const char              *host;
   attachsql_error_st      *error= NULL;
+  attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
 
   if (args.socket)
   {
@@ -220,7 +221,6 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
                              args.db,
                              &error);
   }
-
   if (con == NULL)
   {
     log_text(LOG_FATAL, "unable to Add libAttachSQL Connection, aborting...");
@@ -228,7 +228,8 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     attachsql_error_free(error);
     return 1;
   }
-  /*
+  attachsql_connect_set_option(con, ATTACHSQL_OPTION_SEMI_BLOCKING, NULL);
+
   if ((error= attachsql_connect(con)))
   {
     log_text(LOG_FATAL, "unable to connect to libAttachSQL server");
@@ -238,7 +239,21 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     return 1;
 
   }
-  */
+
+  while (aret != ATTACHSQL_RETURN_IDLE)
+  {
+    aret = attachsql_connect_poll(con, &error);
+
+    if (error)
+    {
+      log_text(LOG_FATAL, "unable to connect to libAttachSQL server");
+      log_text(LOG_FATAL, "error %d: %s", error->code, error->msg);
+      attachsql_error_free(error);
+      attachsql_connect_destroy(con);
+      return 1;
+    }
+  }
+
   sb_conn->ptr = con;
 
   return 0;
