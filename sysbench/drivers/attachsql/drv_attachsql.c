@@ -160,7 +160,7 @@ int attachsql_drv_init(void)
   args.user = sb_get_value_string("attachsql-user");
   args.password = sb_get_value_string("attachsql-password");
   args.db = sb_get_value_string("attachsql-db");
-  
+  attachsql_library_init();
   return 0;
 }
 
@@ -183,7 +183,7 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
 {
   attachsql_connect_t     *con= NULL;
   const char              *host;
-  attachsql_error_st      *error= NULL;
+  attachsql_error_t      *error= NULL;
   attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
 
   if (args.socket)
@@ -224,16 +224,16 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
   if (con == NULL)
   {
     log_text(LOG_FATAL, "unable to Add libAttachSQL Connection, aborting...");
-    log_text(LOG_FATAL, "error %d: %s", error->code, error->msg);
+    log_text(LOG_FATAL, "error %d: %s", attachsql_error_code(error), attachsql_error_message(error));
     attachsql_error_free(error);
     return 1;
   }
   attachsql_connect_set_option(con, ATTACHSQL_OPTION_SEMI_BLOCKING, NULL);
 
-  if ((error= attachsql_connect(con)))
+  if (!attachsql_connect(con, &error))
   {
     log_text(LOG_FATAL, "unable to connect to libAttachSQL server");
-    log_text(LOG_FATAL, "error %d: %s", error->code, error->msg);
+    log_text(LOG_FATAL, "error %d: %s", attachsql_error_code(error), attachsql_error_message(error));
     attachsql_error_free(error);
     attachsql_connect_destroy(con);
     return 1;
@@ -247,7 +247,7 @@ int attachsql_drv_connect(db_conn_t *sb_conn)
     if (error)
     {
       log_text(LOG_FATAL, "unable to connect to libAttachSQL server");
-      log_text(LOG_FATAL, "error %d: %s", error->code, error->msg);
+      log_text(LOG_FATAL, "error %d: %s", attachsql_error_code(error), attachsql_error_message(error));
       attachsql_error_free(error);
       attachsql_connect_destroy(con);
       return 1;
@@ -391,7 +391,7 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
 {
   attachsql_connect_t *con = sb_conn->ptr;
   unsigned int rc;
-  attachsql_error_st *error= NULL;
+  attachsql_error_t *error= NULL;
   attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
 
   /* Close any previous query */
@@ -401,7 +401,7 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
         con,
         query,
         strlen(query));
-  error= attachsql_query(con, strlen(query), query, 0, NULL);
+  attachsql_query(con, strlen(query), query, 0, NULL, &error);
 
   while((aret != ATTACHSQL_RETURN_EOF) && (aret != ATTACHSQL_RETURN_ROW_READY))
   {
@@ -409,13 +409,13 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
 
     if (error)
     {
-      rc= error->code;
+      rc= attachsql_error_code(error);
       if (rc == 1213 || rc == 1205 || rc == 1020)
       {
         attachsql_error_free(error);
         return SB_DB_ERROR_DEADLOCK;
       }
-      log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", error->code, error->msg);
+      log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", attachsql_error_code(error), attachsql_error_message(error));
       attachsql_error_free(error);
       return SB_DB_ERROR_FAILED;
     }
@@ -444,7 +444,7 @@ int attachsql_drv_fetch(db_result_set_t *rs)
 
 int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
 {
-  attachsql_error_st *error= NULL;
+  attachsql_error_t *error= NULL;
   attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
 
   /* NYI */
@@ -457,7 +457,7 @@ int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
 
     if (error)
     {
-      log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", error->code, error->msg);
+      log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", attachsql_error_code(error), attachsql_error_message(error));
       attachsql_error_free(error);
       return 1;
     }
