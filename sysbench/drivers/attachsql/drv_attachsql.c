@@ -29,6 +29,7 @@
 #endif
 #include <stdio.h>
 
+#include <stdint.h>
 #include <libattachsql-1.0/attachsql.h>
 
 #include "sb_options.h"
@@ -67,7 +68,7 @@ typedef struct
 static drv_caps_t attachsql_drv_caps =
 {
   .multi_rows_insert = 1,
-  .prepared_statements = 0,
+  .prepared_statements = 1,
   .auto_increment = 1,
   .serial = 0,
   .unsigned_int = 0,
@@ -281,10 +282,20 @@ int attachsql_drv_disconnect(db_conn_t *sb_conn)
 
 int attachsql_drv_prepare(db_stmt_t *stmt, const char *query)
 {
-
-  /* Use client-side PS */
-  stmt->emulated = 1;
-  stmt->query = strdup(query);
+  attachsql_connect_t *con= (attachsql_connect_t *)stmt->connection->ptr;
+  attachsql_error_t *error= NULL;
+  attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
+  attachsql_statement_prepare(con, strlen(query), query, &error);
+  while(aret != ATTACHSQL_RETURN_EOF)
+  {
+    aret= attachsql_connect_poll(con, &error);
+    if (error)
+    {
+      log_text(LOG_ALERT, "libAttachSQL Prepare Failed: %u:%s", attachsql_error_code(error), attachsql_error_message(error));
+      attachsql_error_free(error);
+      return SB_DB_ERROR_FAILED;
+    }
+  }
 
   return 0;
 }
@@ -293,12 +304,10 @@ int attachsql_drv_prepare(db_stmt_t *stmt, const char *query)
 /* Bind parameters for prepared statement */
 int attachsql_drv_bind_param(db_stmt_t *stmt, db_bind_t *params, unsigned int len)
 {
-  attachsql_connect_t        *con = (attachsql_connect_t *)stmt->connection->ptr;
-  
-  if (con == NULL)
-    return 1;
+  /* libAttachSQL doesn't do this, you do this during execute
+   * this is because sysbench doesn't set the values until that time
+   */
 
-  /* Use emulation */
   if (stmt->bound_param != NULL)
     free(stmt->bound_param);
   stmt->bound_param = (db_bind_t *)malloc(len * sizeof(db_bind_t));
@@ -306,7 +315,7 @@ int attachsql_drv_bind_param(db_stmt_t *stmt, db_bind_t *params, unsigned int le
     return 1;
   memcpy(stmt->bound_param, params, len * sizeof(db_bind_t));
   stmt->bound_param_len = len;
-  
+
   return 0;
 
 }
@@ -318,6 +327,7 @@ int attachsql_drv_bind_result(db_stmt_t *stmt, db_bind_t *params, unsigned int l
   (void)stmt;
   (void)params;
   (void)len;
+  /* libAttachSQL doesn't do this, you get after execute */
   return 0;
 }
 
@@ -327,58 +337,87 @@ int attachsql_drv_bind_result(db_stmt_t *stmt, db_bind_t *params, unsigned int l
 
 int attachsql_drv_execute(db_stmt_t *stmt, db_result_set_t *rs)
 {
-  db_conn_t       *con = stmt->connection;
-  char            *buf = NULL;
-  unsigned int    buflen = 0;
-  unsigned int    i, j, vcnt;
-  char            need_realloc;
-  int             n;
+  attachsql_connect_t *con= (attachsql_connect_t *)stmt->connection->ptr;
+  attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
+  attachsql_error_t *error= NULL;
 
-  /* TODO: use libAttachSQL's own emulation */
-  /* Use emulation */
-  /* Build the actual query string from parameters list */
-  need_realloc = 1;
-  vcnt = 0;
-  for (i = 0, j = 0; stmt->query[i] != '\0'; i++)
+  int i;
+  int8_t tinyint;
+  int16_t smallint;
+  int32_t normalint;
+  int64_t bigint;
+  float float_type;
+  double double_type;
+  db_time_t *time_data;
+  if (con == NULL)
+    return 1;
+
+  for (i= 0; i < stmt->bound_param_len; i++)
   {
-  again:
-    if (j+1 >= buflen || need_realloc)
+    db_bind_t *param= &stmt->bound_param[i];
+    switch(param->type)
     {
-      buflen = (buflen > 0) ? buflen * 2 : 256;
-      buf = realloc(buf, buflen);
-      if (buf == NULL)
-      {
-        log_text(LOG_DEBUG, "ERROR: exiting attachsql_drv_execute(), memory allocation failure");
-        return SB_DB_ERROR_FAILED;
-      }
-      need_realloc = 0;
+      case DB_TYPE_TINYINT:
+        tinyint= *(int8_t*)param->buffer;
+        attachsql_statement_set_int(con, i, tinyint, NULL);
+        break;
+      case DB_TYPE_SMALLINT:
+        smallint= *(int16_t*)param->buffer;
+        attachsql_statement_set_int(con, i, smallint, NULL);
+        break;
+      case DB_TYPE_INT:
+        normalint= *(int32_t*)param->buffer;
+        attachsql_statement_set_int(con, i, normalint, NULL);
+        break;
+      case DB_TYPE_BIGINT:
+        bigint= *(int64_t*)param->buffer;
+        attachsql_statement_set_bigint(con, i, bigint, NULL);
+        break;
+      case DB_TYPE_FLOAT:
+        float_type= *(float*)param->buffer;
+        attachsql_statement_set_float(con, i, float_type, NULL);
+        break;
+      case DB_TYPE_DOUBLE:
+        double_type= *(double*)param->buffer;
+        attachsql_statement_set_double(con, i, double_type, NULL);
+        break;
+      case DB_TYPE_TIME:
+        time_data= (db_time_t*)param->buffer;
+        attachsql_statement_set_time(con, i, time_data->hour, time_data->minute, time_data->second, 0, false, NULL);
+        break;
+      case DB_TYPE_DATE:
+      case DB_TYPE_DATETIME:
+      case DB_TYPE_TIMESTAMP:
+        time_data= (db_time_t*)param->buffer;
+        attachsql_statement_set_datetime(con, i, time_data->year, time_data->month, time_data->day, time_data->hour, time_data->minute, time_data->second, 0, NULL);
+        break;
+      case DB_TYPE_CHAR:
+      case DB_TYPE_VARCHAR:
+        attachsql_statement_set_string(con, i, param->max_len, param->buffer, NULL);
+      case DB_TYPE_NONE:
+      default:
+        attachsql_statement_set_null(con, i, NULL);
+        /* Not supported */
     }
-
-    if (stmt->query[i] != '?')
-    {
-      buf[j++] = stmt->query[i];
-      continue;
-    }
-
-    n = db_print_value(stmt->bound_param + vcnt, buf + j, (int)(buflen - j));
-    if (n < 0)
-    {
-      need_realloc = 1;
-      goto again;
-    }
-    j += (unsigned int)n;
-    vcnt++;
   }
-  buf[j] = '\0';
-  
-  con->db_errno = attachsql_drv_query(con, buf, rs);
-  free(buf);
-  if (con->db_errno != SB_DB_ERROR_NONE)
+
+  attachsql_statement_execute(con, &error);
+
+  while(aret != ATTACHSQL_RETURN_EOF)
   {
-    log_text(LOG_DEBUG, "ERROR: exiting attachsql_drv_execute(), database error");
-    return con->db_errno;
+    aret= attachsql_connect_poll(con, &error);
+    if (aret == ATTACHSQL_RETURN_ROW_READY)
+    {
+      return 0;
+    }
+    if (error)
+    {
+      log_text(LOG_ALERT, "libAttachSQL Execute Failed: %u:%s", attachsql_error_code(error), attachsql_error_message(error));
+      attachsql_error_free(error);
+      return SB_DB_ERROR_FAILED;
+    }
   }
-  
+
   return SB_DB_ERROR_NONE;
 }
 
@@ -433,9 +472,37 @@ int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
 int attachsql_drv_fetch(db_result_set_t *rs)
 {
   /* NYI */
-  db_row_t row;
+  attachsql_connect_t *con = rs->connection->ptr;
+  char *tmp;
+  size_t tmp_len;
+  uint16_t columns, col;
+  attachsql_return_t aret;
+  attachsql_error_t *error= NULL;
 
-  return attachsql_drv_fetch_row(rs, &row);
+  while((aret != ATTACHSQL_RETURN_EOF) && (aret != ATTACHSQL_RETURN_ROW_READY))
+  {
+    aret= attachsql_connect_poll(con, &error);
+
+    if (error)
+    {
+      log_text(LOG_ALERT, "libAttachSQL Query Failed: %u:%s", attachsql_error_code(error), attachsql_error_message(error));
+      attachsql_error_free(error);
+      return 1;
+    }
+  }
+  if (aret == ATTACHSQL_RETURN_EOF)
+  {
+    return 1;
+  }
+  attachsql_statement_row_get(con, NULL);
+  columns= attachsql_query_column_count(con);
+  for (col= 0; col < columns; col++)
+  {
+    tmp= attachsql_statement_get_char(con, col, &tmp_len, &error);
+  }
+  attachsql_query_row_next(con);
+
+  return 0;
 }
 
 
@@ -449,7 +516,7 @@ int attachsql_drv_fetch_row(db_result_set_t *rs, db_row_t *row)
 
   /* NYI */
 
-  attachsql_connect_t *con = rs->connection->ptr;;
+  attachsql_connect_t *con = rs->connection->ptr;
 
   while((aret != ATTACHSQL_RETURN_EOF) && (aret != ATTACHSQL_RETURN_ROW_READY))
   {
@@ -492,7 +559,14 @@ int attachsql_drv_store_results(db_result_set_t *rs)
   /* libAttachSQL can't do things in this order */
   while (ret == 0)
   {
-    ret= attachsql_drv_fetch_row(rs, &row);
+    if (rs->statement != NULL)
+    {
+      ret= attachsql_drv_fetch(rs);
+    }
+    else
+    {
+      ret= attachsql_drv_fetch_row(rs, &row);
+    }
   }
 
   return SB_DB_ERROR_NONE;
@@ -508,7 +582,14 @@ int attachsql_drv_free_results(db_result_set_t *rs)
   if (rs->connection->ptr != NULL)
   {
     DEBUG("attachsql_query_close(%p)", rs->connection->ptr);
-    attachsql_query_close(rs->connection->ptr);
+    if (rs->statement != NULL)
+    {
+      attachsql_statement_close(rs->connection->ptr);
+    }
+    else
+    {
+      attachsql_query_close(rs->connection->ptr);
+    }
     return 0;
   }
 
@@ -521,7 +602,9 @@ int attachsql_drv_free_results(db_result_set_t *rs)
 
 int attachsql_drv_close(db_stmt_t *stmt)
 {
-  (void)stmt;
+  attachsql_connect_t *con= (attachsql_connect_t *)stmt->connection->ptr;
+  attachsql_statement_close(con);
+
   return 0;
 }
 
