@@ -582,14 +582,7 @@ int attachsql_drv_free_results(db_result_set_t *rs)
   if (rs->connection->ptr != NULL)
   {
     DEBUG("attachsql_query_close(%p)", rs->connection->ptr);
-    if (rs->statement != NULL)
-    {
-      attachsql_statement_close(rs->connection->ptr);
-    }
-    else
-    {
-      attachsql_query_close(rs->connection->ptr);
-    }
+    attachsql_query_close(rs->connection->ptr);
     return 0;
   }
 
