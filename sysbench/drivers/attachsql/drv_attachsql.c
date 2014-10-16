@@ -337,11 +337,12 @@ int attachsql_drv_bind_result(db_stmt_t *stmt, db_bind_t *params, unsigned int l
 
 int attachsql_drv_execute(db_stmt_t *stmt, db_result_set_t *rs)
 {
+  (void) rs;
   attachsql_connect_t *con= (attachsql_connect_t *)stmt->connection->ptr;
   attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
   attachsql_error_t *error= NULL;
 
-  int i;
+  uint16_t i;
   int8_t tinyint;
   int16_t smallint;
   int32_t normalint;
@@ -428,6 +429,7 @@ int attachsql_drv_execute(db_stmt_t *stmt, db_result_set_t *rs)
 int attachsql_drv_query(db_conn_t *sb_conn, const char *query,
                       db_result_set_t *rs)
 {
+  (void) rs;
   attachsql_connect_t *con = sb_conn->ptr;
   unsigned int rc;
   attachsql_error_t *error= NULL;
@@ -473,10 +475,9 @@ int attachsql_drv_fetch(db_result_set_t *rs)
 {
   /* NYI */
   attachsql_connect_t *con = rs->connection->ptr;
-  char *tmp;
   size_t tmp_len;
   uint16_t columns, col;
-  attachsql_return_t aret;
+  attachsql_return_t aret= ATTACHSQL_RETURN_NONE;
   attachsql_error_t *error= NULL;
 
   while((aret != ATTACHSQL_RETURN_EOF) && (aret != ATTACHSQL_RETURN_ROW_READY))
@@ -498,7 +499,28 @@ int attachsql_drv_fetch(db_result_set_t *rs)
   columns= attachsql_query_column_count(con);
   for (col= 0; col < columns; col++)
   {
-    tmp= attachsql_statement_get_char(con, col, &tmp_len, &error);
+    switch (attachsql_statement_get_column_type(con, col))
+    {
+      case ATTACHSQL_COLUMN_TYPE_TINY:
+      case ATTACHSQL_COLUMN_TYPE_SHORT:
+      case ATTACHSQL_COLUMN_TYPE_LONG:
+      case ATTACHSQL_COLUMN_TYPE_YEAR:
+      case ATTACHSQL_COLUMN_TYPE_INT24:
+        attachsql_statement_get_int(con, col, &error);
+        break;
+      case ATTACHSQL_COLUMN_TYPE_LONGLONG:
+        attachsql_statement_get_bigint(con, col, &error);
+        break;
+      case ATTACHSQL_COLUMN_TYPE_FLOAT:
+        attachsql_statement_get_float(con, col, &error);
+        break;
+      case ATTACHSQL_COLUMN_TYPE_DOUBLE:
+        attachsql_statement_get_double(con, col, &error);
+        break;
+      default:
+        attachsql_statement_get_char(con, col, &tmp_len, &error);
+        break;
+    }
   }
   attachsql_query_row_next(con);
 
